@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>BracketHQ Clone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2e7d32">
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<style>
+:root {
+  --bg:#f0fff0;
+  --card:#c8e6c9;
+  --primary:#2e7d32;
+  --accent:#1b5e20;
+  --winner:#a5d6a7;
+  --text:#1b1b1b;
+}
+
+body.dark {
+  --bg:#121212;
+  --card:#1e1e1e;
+  --primary:#66bb6a;
+  --accent:#388e3c;
+  --winner:#2e7d32;
+  --text:#e0e0e0;
+}
+
+* { box-sizing:border-box; }
+
+body {
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font-family:system-ui,-apple-system,BlinkMacSystemFont;
+  transition:0.3s;
+}
+
+header {
+  background:var(--primary);
+  color:white;
+  padding:12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+button {
+  background:var(--primary);
+  color:white;
+  border:none;
+  padding:6px 12px;
+  border-radius:4px;
+  cursor:pointer;
+}
+
+button.secondary {
+  background:var(--accent);
+}
+
+button.danger {
+  background:#c62828;
+}
+
+.container {
+  padding:12px;
+  max-width:1400px;
+  margin:auto;
+}
+
+.hidden { display:none; }
+
+/* DASHBOARD */
+.grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+  gap:12px;
+}
+
+.card {
+  background:var(--card);
+  padding:12px;
+  border-radius:8px;
+}
+
+/* PLAYER LIST */
+#players li {
+  list-style:none;
+  background:var(--winner);
+  margin:4px 0;
+  padding:6px;
+  border-radius:4px;
+  cursor:grab;
+  display:flex;
+  justify-content:space-between;
+}
+
+/* BRACKET */
+.rounds {
+  display:flex;
+  gap:12px;
+  overflow-x:auto;
+}
+
+.round {
+  min-width:220px;
+}
+
+.match {
+  background:var(--card);
+  padding:8px;
+  margin-bottom:8px;
+  border-radius:6px;
+  border:2px solid transparent;
+}
+
+.match.winner {
+  border-color:var(--accent);
+  background:var(--winner);
+}
+
+.match.champion {
+  border-color:gold;
+  background:#fff3cd;
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <b>BracketHQ Clone</b>
+  <div>
+    <button onclick="toggleDark()">🌙</button>
+    <button onclick="goHome()">🏠</button>
+  </div>
+</header>
+
+<div class="container">
+
+<!-- HOME -->
+<section id="home">
+  <h2>Your Brackets</h2>
+  <div id="bracketList" class="grid"></div>
+  <button onclick="showCreate()">➕ New Bracket</button>
+</section>
+
+<!-- CREATE -->
+<section id="create" class="hidden">
+  <h2>Create Bracket</h2>
+
+  <input id="name" placeholder="Bracket name">
+  <select id="type">
+    <option value="single">Single Elimination</option>
+    <option value="double">Double Elimination</option>
+  </select>
+
+  <input id="playerInput" placeholder="Add player">
+  <button onclick="addPlayer()">Add</button>
+
+  <ul id="players"></ul>
+
+  <button onclick="shuffle()">🎲 Random Seed</button>
+  <button onclick="start()">Start</button>
+</section>
+
+<!-- BRACKET -->
+<section id="bracket" class="hidden">
+  <h2 id="title"></h2>
+
+  <h3>Winners Bracket</h3>
+  <div id="winners" class="rounds"></div>
+
+  <h3 id="losersTitle" class="hidden">Losers Bracket</h3>
+  <div id="losers" class="rounds hidden"></div>
+
+  <button onclick="exportPNG()">Export PNG</button>
+  <button onclick="finish()">Finish</button>
+</section>
+
+</div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('service-worker.js');
+}
+
+let state = {
+  brackets: JSON.parse(localStorage.getItem('brackets')||'[]'),
+  current:null,
+  players:[]
+};
+
+/* UI NAV */
+function showCreate(){
+  home.classList.add('hidden');
+  create.classList.remove('hidden');
+}
+function goHome(){
+  create.classList.add('hidden');
+  bracket.classList.add('hidden');
+  home.classList.remove('hidden');
+  renderHome();
+}
+
+/* DARK MODE */
+function toggleDark(){
+  document.body.classList.toggle('dark');
+}
+
+/* PLAYER MANAGEMENT */
+function addPlayer(){
+  let v=playerInput.value.trim();
+  if(!v) return;
+  state.players.push(v);
+  playerInput.value='';
+  renderPlayers();
+}
+function renderPlayers(){
+  players.innerHTML='';
+  state.players.forEach((p,i)=>{
+    let li=document.createElement('li');
+    li.draggable=true;
+    li.innerHTML=`${p}<button onclick="removePlayer(${i})">❌</button>`;
+    li.ondragstart=e=>drag=i;
+    li.ondrop=e=>swap(i);
+    li.ondragover=e=>e.preventDefault();
+    players.appendChild(li);
+  });
+}
+function removePlayer(i){
+  state.players.splice(i,1);
+  renderPlayers();
+}
+let drag=null;
+function swap(i){
+  [state.players[drag],state.players[i]]=[state.players[i],state.players[drag]];
+  renderPlayers();
+}
+function shuffle(){
+  state.players.sort(()=>Math.random()-0.5);
+  renderPlayers();
+}
+
+/* BRACKET LOGIC */
+function start(){
+  if(state.players.length<2) return alert("Need at least 2 players");
+  state.current={
+    id:Date.now(),
+    name:name.value,
+    type:type.value,
+    players:[...state.players],
+    rounds:buildRounds(state.players),
+    losers: type.value==='double'?[]:null
+  };
+  title.textContent=state.current.name;
+  create.classList.add('hidden');
+  bracket.classList.remove('hidden');
+  renderBracket();
+}
+
+/* BUILD ROUNDS */
+function buildRounds(players){
+  let rounds=[];
+  let current=[...players];
+  while(current.length>1){
+    let r=[];
+    for(let i=0;i<current.length;i+=2){
+      r.push({
+        p1:current[i]||"BYE",
+        p2:current[i+1]||"BYE",
+        s1:null,s2:null,w:null
+      });
+    }
+    rounds.push(r);
+    current=new Array(r.length);
+  }
+  return rounds;
+}
+
+/* RENDER */
+function renderBracket(){
+  winners.innerHTML='';
+  state.current.rounds.forEach((round,ri)=>{
+    let col=document.createElement('div');
+    col.className='round';
+    round.forEach((m,mi)=>{
+      let d=document.createElement('div');
+      d.className='match'+(m.w?' winner':'');
+      d.innerHTML=`
+        ${m.p1} <input type="number" value="${m.s1??''}" onchange="score(${ri},${mi},1,this.value)">
+        <br>
+        ${m.p2} <input type="number" value="${m.s2??''}" onchange="score(${ri},${mi},2,this.value)">
+      `;
+      col.appendChild(d);
+    });
+    winners.appendChild(col);
+  });
+}
+
+/* SCORE */
+function score(r,m,p,val){
+  let match=state.current.rounds[r][m];
+  match['s'+p]=+val;
+  if(match.s1!=null && match.s2!=null){
+    match.w = match.s1>match.s2?match.p1:match.p2;
+    if(state.current.rounds[r+1]){
+      state.current.rounds[r+1][Math.floor(m/2)][m%2?'p2':'p1']=match.w;
+    }
+  }
+  renderBracket();
+}
+
+/* SAVE */
+function finish(){
+  state.brackets.push(state.current);
+  localStorage.setItem('brackets',JSON.stringify(state.brackets));
+  goHome();
+}
+
+/* HOME */
+function renderHome(){
+  bracketList.innerHTML='';
+  state.brackets.forEach((b,i)=>{
+    let c=document.createElement('div');
+    c.className='card';
+    c.innerHTML=`
+      <b>${b.name}</b><br>
+      <button onclick="open(${i})">Open</button>
+      <button class="danger" onclick="del(${i})">Delete</button>
+    `;
+    bracketList.appendChild(c);
+  });
+}
+function open(i){
+  state.current=state.brackets[i];
+  title.textContent=state.current.name;
+  home.classList.add('hidden');
+  bracket.classList.remove('hidden');
+  renderBracket();
+}
+function del(i){
+  state.brackets.splice(i,1);
+  localStorage.setItem('brackets',JSON.stringify(state.brackets));
+  renderHome();
+}
+
+/* EXPORT */
+function exportPNG(){
+  html2canvas(bracket).then(c=>{
+    let a=document.createElement('a');
+    a.href=c.toDataURL();
+    a.download='bracket.png';
+    a.click();
+  });
+}
+
+renderHome();
+</script>
+</body>
+</html>
